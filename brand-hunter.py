@@ -112,7 +112,11 @@ def main(opts, args):
     processed = set()
 
     count = 0
-    for pkg in sorted(yb.pkgSack.returnPackages(patterns=args)):
+    pkgs = sorted(yb.pkgSack.returnPackages(patterns=args))
+    if not pkgs:
+      print "no packages found matching patterns %s" % args
+
+    for pkg in pkgs:
       # if count == 100: break
       if not str(pkg) in processed:
 
