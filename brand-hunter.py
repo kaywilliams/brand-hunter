@@ -76,11 +76,14 @@ MIME = magic.open(magic.MAGIC_MIME)
 MIME.load()
 
 RE = re.compile(r'[Rr][Ee][Dd]\s?[Hh][Aa][Tt]', flags=re.M)
+RE_EMAIL = re.compile(r'<[^@]+@redhat.com>', flags=re.M)
 
 TAR_OPEN_MODE = {
   'application/x-bzip2' : 'r:bz2',
   'application/x-gzip'  : 'r:gz',
   }
+
+SEARCH_DIRS = [ 'SPECS', 'SOURCES' ]
 
 def main(opts, args):
     if not os.path.exists(opts.working_dir):
@@ -102,6 +105,7 @@ def main(opts, args):
     with open(yumconf, 'w') as f:
       f.write('\n'.join(text))
 
+    # get list of packages
     yb = yum.YumBase()
     yb.preconf.fn = yumconf 
     yb.preconf.root = opts.working_dir
@@ -111,34 +115,44 @@ def main(opts, args):
 
     processed = set()
 
-    count = 0
     pkgs = sorted(yb.pkgSack.returnPackages(patterns=args))
     if not pkgs:
       print "no packages found matching patterns %s" % args
 
+    # process packages
+    count = 0 
     for pkg in pkgs:
       # if count == 100: break
       if not str(pkg) in processed:
 
         print str(pkg)
 
+        # setup
         topdir = '%s/SRPMS/%s' % (opts.working_dir, str(pkg))
-        srcdir = '%s/SOURCES' % topdir
         issues_file = '%s/issues.txt' % topdir
+        if os.path.exists(topdir):
+          for i in os.listdir(topdir):
+            p = os.path.join(topdir, i)
+            if os.path.isdir(p):
+              shutil.rmtree(p, ignore_errors=True)
+            else:
+              os.remove(p)
 
-        if os.path.exists(issues_file): os.remove(issues_file)
-        shutil.rmtree(srcdir, ignore_errors=True)
-
+        # download and install srpm
         yb.downloadPkgs([pkg])
         subprocess.check_call("rpm --define '_topdir %s' -i %s" % 
                               (topdir, pkg.localPkg()), shell=True,
                               stdout=DEVNULL, stderr=DEVNULL)
 
+        # search files
         issues = []
-        for path,_,files in os.walk(srcdir, topdown=False):
-          for file in files:
-            find_issues(issues, srcdir, os.path.join(path, file))
+        for dir in SEARCH_DIRS:
+          searchdir = os.path.join(topdir, dir)
+          for path,_,files in os.walk(searchdir, topdown=False):
+            for file in files:
+              find_issues(issues, topdir, os.path.join(path, file))
 
+        # output results
         if issues:
           with open(issues_file, 'w') as f:
             f.write("\n".join(issues) + '\n')
@@ -151,8 +165,8 @@ def main(opts, args):
         processed.add(str(pkg))
         count += 1
 
-def find_issues(issues, root, file):
-  relpath = file.replace(root + '/', '')
+def find_issues(issues, topdir, file):
+  relpath = file.replace(topdir + '/', '')
 
   if not os.path.exists(file):
     return
@@ -167,7 +181,15 @@ def find_issues(issues, root, file):
       s = fo.read()
       for m in RE.finditer(s):
         lineno = s.count('\n',0,m.start())
-        issues.append('%s:%s:%s' % (relpath, lineno+1, s.split('\n')[lineno]))
+        line = s.split('\n')[lineno]
+
+        # filter out lines with email only matches
+        if opts.ignore_email:
+          email = RE_EMAIL.findall(line)
+          if email and len(email) == len(RE.findall(line)):
+            continue
+
+        issues.append('%s:%s:%s' % (relpath, lineno+1, line))
 
   elif ('application/x-bzip2' in mimetype or 
         'application/x-gzip' in mimetype):
@@ -180,9 +202,9 @@ def find_issues(issues, root, file):
       tf.extractall(os.path.dirname(file))
       os.remove(file)
       for n in tf.getnames():
-        mp = '%s/%s' % (os.path.dirname(file), n)
-        if 'application/x-directory' not in MIME.file(mp):
-          find_issues(issues, root, mp)
+        mp = os.path.join(os.path.dirname(file), n)
+        if not os.path.isdir(mp):
+          find_issues(issues, topdir, mp)
 
   else:
     issues.append('%s:binary file' % relpath) 
@@ -198,7 +220,7 @@ if __name__ == '__main__':
     "At the completion of processing, a list of srpms with no issues will be "
     "written to a file located at <working-dir>/noissues.txt."
     "\n"
-    "Issues for individual srpms will be written to file located at "
+    "Issues for individual srpms will be written to a file located at "
     "<working-dir>/SRPMS/<srpm>/issues.txt"
     ))
 
@@ -209,7 +231,13 @@ if __name__ == '__main__':
     #   default=[],
     #   help="file containing srpms to ignore")
  
-    parser.add_option('-w', '--working-dir', metavar='PATH',
+    parser.add_option('--ignore-email',
+      dest='ignore_email',
+      action='store_true',
+      default=False,
+      help="ignore text that matches '<email@redhat.com>'")
+
+    parser.add_option('--working-dir', metavar='PATH',
       dest='working_dir',
       default=os.path.expanduser('~/brand-hunter'),
       help="defaults to ~/brand-hunter")
