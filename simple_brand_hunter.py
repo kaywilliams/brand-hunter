@@ -17,7 +17,7 @@
 """
 brand_hunter
 
-searches files in the current directory for possible Red Hat branding issues
+searches spec and source files for possible Red Hat branding issues
 """
 
 try:
@@ -47,21 +47,36 @@ TAR_OPEN_MODE = {
 
 
 def main(opts, args):
-  # search files
-  issues = []
-  topdir = os.getcwd()
-  for path,_,files in os.walk(topdir, topdown=False):
-    for file in files:
-      find_issues(issues, topdir, os.path.join(path, file))
+  # validate directory
+  for topdir in args:
+    if not ('SPECS' in os.listdir(topdir) and 'SOURCES' in os.listdir(topdir)):
+      print ("Error: The specified directory does not contain SPECS and "
+             "SOURCES folders")
+      sys.exit(1)
 
-  # output results
-  if issues:
-    issues_file = os.path.join(os.getcwd(), 'issues.txt')
-    with open(issues_file, 'w') as f:
-      f.write("\n".join(issues) + '\n')
-    print "Issues found: see issues.txt"
-  else:
-    print "No issues found\n" 
+    # setup
+    print "\nprocessing %s" % topdir
+    issues_file = os.path.join(topdir, 'issues.txt')
+
+    # search files
+    issues = []
+    for dir in ['SPECS', 'SOURCES']:
+      searchdir = os.path.join(topdir, dir)
+      for path,_,files in os.walk(searchdir, topdown=False):
+        for file in files:
+          fp = os.path.join(path, file)
+          if opts.verbose: print fp 
+          find_issues(issues, topdir, fp)
+
+    # output results
+    if issues:
+      with open(issues_file, 'w') as f:
+        f.write("\n".join(issues) + '\n')
+      print "- issues found: see %s" % issues_file
+    else:
+      print "- no issues found"
+
+    print "\n" # blank line at end for readability
     
 
 def find_issues(issues, topdir, file):
@@ -110,9 +125,10 @@ def find_issues(issues, topdir, file):
 
 if __name__ == '__main__': 
 
-    parser = OptionParser("usage: %prog [options] [srpm ...]",
+    parser = OptionParser("usage: %prog [options] directory",
                           description=(
-    "Search files in current directory for possible Red Hat branding issues."
+    "Search files in a specified directory for possible Red Hat branding "
+    "issues."
     ))
 
     parser.add_option('--ignore-email',
@@ -121,7 +137,17 @@ if __name__ == '__main__':
       default=False,
       help="ignore text that matches '<email@redhat.com>'")
 
+    parser.add_option('--verbose', '-v',
+      dest='verbose',
+      action='store_true',
+      default=False,
+      help="print the names of files as they are processed")
+
     opts,args = parser.parse_args(args=sys.argv[1:])
+
+    if not args:
+      print "Error: no directory specified"
+      sys.exit(1)
   
     main(opts, args)
     sys.exit()
