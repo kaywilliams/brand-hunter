@@ -125,10 +125,10 @@ def find_issues(issues, topdir, file):
 
 if __name__ == '__main__': 
 
-    parser = OptionParser("usage: %prog [options] directory",
+    parser = OptionParser("usage: %prog [options] directory...",
                           description=(
-    "Search files in a specified directory for possible Red Hat branding "
-    "issues."
+    "Searches SPEC and SOURCE folders in one or more directories for possible "
+    "Red Hat branding issues."
     ))
 
     parser.add_option('--ignore-email',
